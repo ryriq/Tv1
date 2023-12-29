@@ -1,0 +1,70 @@
+#include <iostream>
+
+
+using namespace std;
+
+/* Допишите класс в соответствии с требованиями задания*/
+class TV {
+  
+    
+public:
+    // Включает телевизор.
+    void TurnOn() {
+         is_turned_on_ = true;
+        // Напишите код этого метода
+    }
+
+    // Выключает телевизор
+    void TurnOff() {
+         is_turned_on_ = false;
+        // Напишите код этого метода
+    }
+
+    // Возвращает true, если телевизор включен и false, если телевизор выключен
+    bool IsTurnedOn() {
+        if (!is_turned_on_) {
+            return false;
+        }
+        // Напишите код этого метода
+        //return false;
+    }
+
+    // Возвращает номер текущего канала, либо 0, если телевизор был выключен.
+    // Телевизор при выключении «запоминает» номер текущего канала,
+    // а при включении — «восстанавливает» его.
+    // При первом включении телевизор показывает канал №1.
+    int GetCurrentChannel() {
+        if (IsTurnedOn()) {
+            return current_channel_;
+        } else {
+             return 0;
+        }
+        // Напишите код этого метода
+       
+    }
+
+    // Выбирает канал с указанным номером. Номер канала должен быть в диапазоне [1..99].
+    // Если указан недопустимый номер канала, либо телевизор выключен, возвращает false и не меняет
+    // текущий канал. В противном случае возвращает true.
+    bool SelectChannel(int channel) {
+        if (0 < channel && channel < 100) {
+            return true;
+        } else {
+        // Напишите код этого метода
+        return false;
+}
+  private: 
+ 	 bool is_turned_on_ = false;
+       int current_channel_ = 1;
+};
+
+int main() {
+    TV tv;
+    cout << tv.IsTurnedOn() << ", channel:"s << tv.GetCurrentChannel() << endl;
+    tv.TurnOn();
+    cout << tv.IsTurnedOn() << ", channel: "s << tv.GetCurrentChannel() << endl;
+    tv.SelectChannel(25);
+    cout << tv.IsTurnedOn() << ", channel: "s << tv.GetCurrentChannel() << endl;
+    tv.TurnOff();
+    cout << tv.IsTurnedOn() << ", channel: "s << tv.GetCurrentChannel() << endl;
+}
