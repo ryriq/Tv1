@@ -1,192 +1,365 @@
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <string>
+#include <utility>
+#include <iterator>
 
-// -------- Начало модульных тестов поисковой системы ----------
+using namespace std;
 
-// Тест проверяет, что поисковая система исключает стоп-слова при добавлении документов
-void TestExcludeStopWordsFromAddedDocumentContent() {
-    const int doc_id = 42;
-    const string content = "cat in the city"s;
-    const vector<int> ratings = {1, 2, 3};
-    {
-        SearchServer server;
-        server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
-        const auto found_docs = server.FindTopDocuments("in"s);
-        ASSERT_EQUAL(found_docs.size(), 1u);
-        const Document& doc0 = found_docs[0];
-        ASSERT_EQUAL(doc0.id, doc_id);
-    }
-
-    {
-        SearchServer server;
-        server.SetStopWords("in the"s);
-        server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
-        ASSERT_HINT(server.FindTopDocuments("in"s).empty(),
-                    "Stop words must be excluded from documents"s);
-    }
-}
-
-/*
-Разместите код остальных тестов здесь
-*/
-// Добавление документов. Добавленный документ должен находиться по поисковому запросу, который содержит слова из документа. 
-// Соответствие документов поисковому запросу. При этом должны быть возвращены все слова из поискового запроса, присутствующие в документе.
-// Сортировка найденных документов по релевантности. Возвращаемые при поиске документов результаты должны быть отсортированы в порядке убывания релевантности.
-
-void TestFindAddedDocumentByDocumentWord() {
-    const int doc_id = 42;
-    const string content = "cat in the city"s;
-    const vector<int> ratings = { 1, 2, 3 };
- 
-    {
-        SearchServer server;
-        ASSERT_EQUAL(server.GetDocumentCount(), 0);
-        server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
-        ASSERT_EQUAL(server.GetDocumentCount(), 1);
-        server.AddDocument(doc_id + 1, "big dog fluffy tail", DocumentStatus::ACTUAL, ratings);
-        ASSERT_EQUAL(server.GetDocumentCount(), 2);
-        const auto found_docs = server.FindTopDocuments("cat"s);
-        ASSERT_EQUAL(found_docs.size(), 1u);
-        const Document& doc0 = found_docs[0];
-        ASSERT_EQUAL(doc0.id, doc_id);
-    }
-}
-
-// ПРоверка минус-слов. Документы, содержащие -слова из поискового запроса, не должны включаться в результат поиска.
-// Если есть соответствие хотя бы по одному минус-слову, должен возвращаться пустой список слов.
-void TestExcludeDocumentsWithMinusWordsFromResults() {
-    SearchServer server;
-    server.AddDocument(101, "fluffy cat fluffy tail"s, DocumentStatus::ACTUAL, { 1,2,3 });
-    server.AddDocument(102, "fluffy small dog "s, DocumentStatus::ACTUAL, { 1,2,3 });
- 
-    {
-        const auto found_docs = server.FindTopDocuments("fluffy -dog"s);
-        ASSERT_EQUAL(found_docs.size(), 1u);
-        ASSERT_EQUAL(found_docs[0].id, 101);
-    }
- 
-    {
-        const auto found_docs = server.FindTopDocuments("fluffy -cat"s);
-        ASSERT_EQUAL(found_docs.size(), 1u);
-        ASSERT_EQUAL(found_docs[0].id, 102);
-    }
- 
-}
- 
-// Соответствие документов поисковому запросу. 
-void TestMatchedDocuments() {
-    SearchServer server;
-    server.SetStopWords("in on and"s);
-    server.AddDocument(103, "fluffy cat and big dog in a collar"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
- 
-    {
-        const auto [matched_words, status] = server.MatchDocument("dog and cat"s, 103);
-        const vector<string> expected_result = { "cat"s, "dog"s };
-        ASSERT_EQUAL(expected_result, matched_words);
-    }
- 
-    {
-        const auto [matched_words, status] = server.MatchDocument("dog and -cat"s, 103);
-        const vector<string> expected_result = {};       // есть минус-слово поэтому резалт пуст
-        ASSERT_EQUAL(expected_result, matched_words);
-        ASSERT(matched_words.empty());
-    }
-}
- 
-// Сортировка найденных документов по релевантности. 
-void TestSortResultsByRelevance() {
-    SearchServer server;
-  
-    server.AddDocument(101, "fluffy dog"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
-    server.AddDocument(102, "dog red collar"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
-    server.AddDocument(103, "fluffy cat fluffy tail"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
- 
-    {
-        const auto found_docs = server.FindTopDocuments("fluffy cat"s);
-        ASSERT_EQUAL(found_docs.size(), 2u);
-        for (size_t i = 1; i < found_docs.size(); i++) {
-            ASSERT(found_docs[i - 1].relevance >= found_docs[i].relevance);
+template <typename Type>
+class SingleLinkedList {
+    // Узел списка
+    struct Node {
+        Node() = default;
+        Node(const Type& val, Node* next)
+            : value(val)
+            , next_node(next) {
         }
+        Type value;
+        Node* next_node = nullptr;
+    };
+
+    // Шаблон класса «Базовый Итератор».
+    // Определяет поведение итератора на элементы односвязного списка
+    // ValueType — совпадает с Type (для Iterator) либо с const Type (для ConstIterator)
+    template <typename ValueType>
+    class BasicIterator {
+        // Класс списка объявляется дружественным, чтобы из методов списка
+        // был доступ к приватной области итератора
+        friend class SingleLinkedList;
+
+        // Конвертирующий конструктор итератора из указателя на узел списка
+        explicit BasicIterator(Node* node) {
+            node_ = node; 
+        } 
+        
+    public:
+        // Объявленные ниже типы сообщают стандартной библиотеке о свойствах этого итератора
+
+        // Категория итератора — forward iterator
+        // (итератор, который поддерживает операции инкремента и многократное разыменование)
+        using iterator_category = std::forward_iterator_tag;
+        // Тип элементов, по которым перемещается итератор
+        using value_type = Type;
+        // Тип, используемый для хранения смещения между итераторами
+        using difference_type = std::ptrdiff_t;
+        // Тип указателя на итерируемое значение
+        using pointer = ValueType*;
+        // Тип ссылки на итерируемое значение
+        using reference = ValueType&;
+
+        BasicIterator() = default;
+
+        // Конвертирующий конструктор/конструктор копирования
+        // При ValueType, совпадающем с Type, играет роль копирующего конструктора
+        // При ValueType, совпадающем с const Type, играет роль конвертирующего конструктора
+        BasicIterator(const BasicIterator<Type>& other) noexcept {
+            node_ = other.node_; 
+        } 
+        
+        // Чтобы компилятор не выдавал предупреждение об отсутствии оператора = при наличии
+        // пользовательского конструктора копирования, явно объявим оператор = и
+        // попросим компилятор сгенерировать его за нас
+        BasicIterator& operator=(const BasicIterator& rhs) = default;
+
+        // Оператор сравнения итераторов (в роли второго аргумента выступает константный итератор)
+        // Два итератора равны, если они ссылаются на один и тот же элемент списка либо на end()
+        [[nodiscard]] bool operator==(const BasicIterator<const Type>& rhs) const noexcept { 
+           return this->node_ == rhs.node_;
+        }
+
+        // Оператор проверки итераторов на неравенство
+        // Противоположен !=
+        [[nodiscard]] bool operator!=(const BasicIterator<const Type>& rhs) const noexcept {
+            return this->node_ != rhs.node_;
+        }
+
+        // Оператор сравнения итераторов (в роли второго аргумента итератор)
+        // Два итератора равны, если они ссылаются на один и тот же элемент списка либо на end()
+        [[nodiscard]] bool operator==(const BasicIterator<Type>& rhs) const noexcept {
+          return this->node_ == rhs.node_;
+        }
+
+        // Оператор проверки итераторов на неравенство
+        // Противоположен !=
+        [[nodiscard]] bool operator!=(const BasicIterator<Type>& rhs) const noexcept {
+            return this->node_ != rhs.node_;
+        }
+
+        // Оператор прединкремента. После его вызова итератор указывает на следующий элемент списка
+        // Возвращает ссылку на самого себя
+        // Инкремент итератора, не указывающего на существующий элемент списка, приводит к неопределённому поведению
+        BasicIterator& operator++() noexcept {
+          node_ = node_->next_node;
+          return *this;
+        }
+
+        // Оператор постинкремента. После его вызова итератор указывает на следующий элемент списка
+        // Возвращает прежнее значение итератора
+        // Инкремент итератора, не указывающего на существующий элемент списка,
+        // приводит к неопределённому поведению
+        BasicIterator operator++(int) noexcept {
+           auto old_value(*this); 
+          node_ = node_->next_node; 
+          return old_value;
+        }
+
+        // Операция разыменования. Возвращает ссылку на текущий элемент
+        // Вызов этого оператора у итератора, не указывающего на существующий элемент списка,
+        // приводит к неопределённому поведению
+        [[nodiscard]] reference operator*() const noexcept {
+            return node_->value;
+        }
+
+        // Операция доступа к члену класса. Возвращает указатель на текущий элемент списка
+        // Вызов этого оператора у итератора, не указывающего на существующий элемент списка,
+        // приводит к неопределённому поведению
+        [[nodiscard]] pointer operator->() const noexcept {
+          return &node_->value;
+        }
+
+    private:
+        Node* node_ = nullptr;
+    };
+
+public:
+        SingleLinkedList() {}
+        
+    // Возвращает количество элементов в списке
+    [[nodiscard]] size_t GetSize() const noexcept {
+        return size_;
     }
-}
- 
-// Вычисление рейтингов. 
-void TestCalculateDocumentRating() {
-    SearchServer server;
-    const vector<int> ratings = { 10, 11, 3 };
-    const int average = (10 + 11 + 3) / 3;
-    server.AddDocument(0, "fluffy cat fluffy tail"s, DocumentStatus::ACTUAL, ratings);
- 
-    {
-        const auto found_docs = server.FindTopDocuments("fluffy cat"s);
-        ASSERT_EQUAL(found_docs.size(), 1u);
-        ASSERT_EQUAL(found_docs[0].rating, average);
+
+    // Сообщает, пустой ли список
+    [[nodiscard]] bool IsEmpty() const noexcept {
+    if (size_ != 0) {
+    return false;
     }
-}
- 
-// Фильтрация результатов поиска с использованием заданного предиката. 
-void TestDocumentSearchByPredicate() {
-    SearchServer server;
+        return true;
+    }
     
-    server.AddDocument(101, "dog in the village"s, DocumentStatus::IRRELEVANT, { -1, -2, -3 });
-    server.AddDocument(102, "hamster and dog in the village"s, DocumentStatus::ACTUAL, { -4, -5, -6 });
-    server.AddDocument(103, "cat in the city"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
-    const auto found_docs = server.FindTopDocuments("in the cat"s, [](int document_id, DocumentStatus status, int rating) { return rating > 0; });
- 
-    {
-        ASSERT_HINT(found_docs[0].id == 103, "Wrong predicate");
-    }
-}
- 
-// Поиск документов с заданным статусом. 
-void TestDocumentSearchByStatus() {
-    const int doc_id1 = 42;
-    const int doc_id2 = 43;
-    const int doc_id3 = 44;
-    const string content1 = "cat in the village"s;
-    const string content2 = "cat in the city"s;
-    const string content3 = "cat in the city or village"s;
-    const vector<int> ratings = { 1, 2, 3 };
-    SearchServer server;
-    server.AddDocument(doc_id1, content1, DocumentStatus::ACTUAL, ratings);
-    server.AddDocument(doc_id2, content2, DocumentStatus::IRRELEVANT, ratings);
-    server.AddDocument(doc_id3, content3, DocumentStatus::IRRELEVANT, ratings);
-    const auto found_docs = server.FindTopDocuments("in the cat"s, DocumentStatus::IRRELEVANT);
- 
-    {
-        ASSERT_HINT(found_docs[0].id == doc_id2, "Wrong status");
-        ASSERT_HINT(found_docs[1].id == doc_id3, "Wrong status");
-        ASSERT_HINT(found_docs.size() == 2, "Wrong status request");
-    }
-}
- 
-// вычисление корректной релевантности найденных документов. 
-
-void TestCalculateRelevance() {
-    SearchServer server;
     
-    server.AddDocument(101, "fluffy cat fluffy tail"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
-    server.AddDocument(102, "small dog big ears"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
-    server.AddDocument(103, "black cat with blue eyes"s, DocumentStatus::ACTUAL, { 1, 2, 3 });
-    const auto found_docs = server.FindTopDocuments("fluffy small cat"s);
-    double relevance_query = log((3 * 1.0) / 1) * (2.0 / 4.0) + log((3 * 1.0) / 2) * (1.0 / 4.0);
- 
+    // Вставляет элемент value в начало списка 
+    void PushFront(const Type& value) {
+    head_.next_node = new Node(value, head_.next_node);
+        ++size_;
+    }
+
+    // Очищает список 
+    void Clear() noexcept {
+    while (head_.next_node != nullptr) {
+    Node* new_head = head_.next_node->next_node;
+      delete head_.next_node;
+        head_.next_node = new_head;
+       } 
+       size_ = 0;
+    }
+    
+    ~SingleLinkedList() {
+        Clear();
+    }
+
+ using value_type = Type;
+    using reference = value_type&;
+    using const_reference = const value_type&;
+
+    // Итератор, допускающий изменение элементов списка
+    using Iterator = BasicIterator<Type>;
+    // Константный итератор, предоставляющий доступ для чтения к элементам списка
+    using ConstIterator = BasicIterator<const Type>;
+
+    // Возвращает итератор, ссылающийся на первый элемент
+    // Если список пустой, возвращённый итератор будет равен end()
+    [[nodiscard]] Iterator begin() noexcept {
+        return Iterator{head_.next_node}; 
+    }
+
+    // Возвращает итератор, указывающий на позицию, следующую за последним элементом односвязного списка
+    // Разыменовывать этот итератор нельзя — попытка разыменования приведёт к неопределённому поведению
+    [[nodiscard]] Iterator end() noexcept {
+        return Iterator{nullptr};
+    }
+    
+    // Возвращает константный итератор, ссылающийся на первый элемент
+    // Если список пустой, возвращённый итератор будет равен end()
+    // Результат вызова эквивалентен вызову метода cbegin()
+    [[nodiscard]] ConstIterator begin() const noexcept {
+        return ConstIterator{head_.next_node};
+    }
+
+    // Возвращает константный итератор, указывающий на позицию, следующую за последним элементом односвязного списка
+    // Разыменовывать этот итератор нельзя — попытка разыменования приведёт к неопределённому поведению
+    // Результат вызова эквивалентен вызову метода cend()
+    [[nodiscard]] ConstIterator end() const noexcept {
+        return ConstIterator{nullptr};
+    }
+
+    // Возвращает константный итератор, ссылающийся на первый элемент
+    // Если список пустой, возвращённый итератор будет равен cend()
+    [[nodiscard]] ConstIterator cbegin() const noexcept {
+        return ConstIterator{head_.next_node};
+    }
+
+    // Возвращает константный итератор, указывающий на позицию, следующую за последним элементом односвязного списка
+    // Разыменовывать этот итератор нельзя — попытка разыменования приведёт к неопределённому поведению
+    [[nodiscard]] ConstIterator cend() const noexcept {
+        return ConstIterator{nullptr};
+    }
+
+     // Возвращает итератор, указывающий на позицию перед первым элементом односвязного списка.
+    // Разыменовывать этот итератор нельзя - попытка разыменования приведёт к неопределённому поведению
+    [[nodiscard]] Iterator before_begin() noexcept {
+    return Iterator{ &head_ };
+    }
+
+    // Возвращает константный итератор, указывающий на позицию перед первым элементом односвязного списка.
+    // Разыменовывать этот итератор нельзя - попытка разыменования приведёт к неопределённому поведению
+    [[nodiscard]] ConstIterator cbefore_begin() const noexcept {
+    return ConstIterator{ const_cast<Node*>(&head_) };
+    }
+
+    // Возвращает константный итератор, указывающий на позицию перед первым элементом односвязного списка.
+    // Разыменовывать этот итератор нельзя - попытка разыменования приведёт к неопределённому поведению
+    [[nodiscard]] ConstIterator before_begin() const noexcept {
+    return cbefore_begin();
+    }
+
+    /*
+     * Вставляет элемент value после элемента, на который указывает pos.
+     * Возвращает итератор на вставленный элемент
+     * Если при создании элемента будет выброшено исключение, список останется в прежнем состоянии
+     */
+    Iterator InsertAfter(ConstIterator pos, const Type& value) {
+    assert(pos.node_ != nullptr);
+        pos.node_->next_node = new Node(value, pos.node_->next_node);
+        ++size_;
+        return Iterator{ pos.node_->next_node };
+    }
+
+// Удаляет первый элемента непустого списка 
+    void PopFront() noexcept {
+        assert(!IsEmpty());
+        auto new_head = head_.next_node->next_node;
+        delete head_.next_node;
+        head_.next_node = new_head;
+        --size_;
+     }
+
+    /*
+     * Удаляет элемент, следующий за pos.
+     * Возвращает итератор на элемент, следующий за удалённым
+     */
+    Iterator EraseAfter(ConstIterator pos) noexcept {
+    assert(!IsEmpty());
+        assert(pos.node_ != nullptr);
+        auto temp = pos.node_->next_node->next_node;
+        delete pos.node_->next_node;
+        pos.node_->next_node = temp;
+        --size_;
+        return Iterator{ pos.node_->next_node };
+    }
+
+    SingleLinkedList(std::initializer_list<Type> values) {
+    SingleLinkedList tmp;
+    SingleLinkedList tmp1;
+    for (auto it = values.begin(); it != values.end(); ++it) {
+    tmp.PushFront(*it);
+    }
+    for (auto it = tmp.begin(); it != tmp.end(); ++it) {
+    tmp1.PushFront(*it);
+    }
+    swap(tmp1);
+    }
+       
+    SingleLinkedList(const SingleLinkedList& other) {
+     SingleLinkedList tmp;
+    SingleLinkedList tmp1;
+    for (auto it = other.begin(); it != other.end(); ++it) {
+    tmp.PushFront(*it);
+    }
+    for (auto it = tmp.begin(); it != tmp.end(); ++it) {
+    tmp1.PushFront(*it);
+    }
+    swap(tmp1);
+    }
+    
+    SingleLinkedList& operator=(const SingleLinkedList& rhs) {
+    if (this != &rhs) {
+    SingleLinkedList tmp(rhs);
+    swap(tmp);
+    }
+        return *this;
+    }
+
+    void swap(SingleLinkedList& other) noexcept {
+    std::swap(other.head_.next_node, head_.next_node);
+        std::swap(other.size_, size_);
+    }
+    
+private:
+
+    // Фиктивный узел, используется для вставки "перед первым элементом"
+    Node head_;
+    size_t size_ = 0;
+};
+
+template <typename Type>
+void swap(SingleLinkedList<Type>& lhs, SingleLinkedList<Type>& rhs) noexcept {
+lhs.swap(rhs);
+}
+
+template <typename Type>
+bool operator==(const SingleLinkedList<Type>& lhs, const SingleLinkedList<Type>& rhs) {
+equal(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+    return true;
+}
+
+template <typename Type>
+bool operator!=(const SingleLinkedList<Type>& lhs, const SingleLinkedList<Type>& rhs) {
+!equal(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+    return true;
+}
+
+template <typename Type>
+bool operator<(const SingleLinkedList<Type>& lhs, const SingleLinkedList<Type>& rhs) {
+std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+    return true;
+}
+
+template <typename Type>
+bool operator<=(const SingleLinkedList<Type>& lhs, const SingleLinkedList<Type>& rhs) {
+return lhs > rhs;
+    return true;
+}
+
+ template <typename Type>
+ bool operator>(const SingleLinkedList<Type>& lhs, const SingleLinkedList<Type>& rhs) {
+ return rhs < lhs;
+   return true;
+ }
+
+template <typename Type>
+bool operator>=(const SingleLinkedList<Type>& lhs, const SingleLinkedList<Type>& rhs) {
+return lhs > rhs;
+    return true;
+}
+
+void Test0() {
+    using namespace std;
     {
-        ASSERT_HINT(fabs(found_docs[0].relevance - relevance_query) < 1e-6, "Wrong calculated relevance");
+        const SingleLinkedList<int> empty_int_list;
+        assert(empty_int_list.GetSize() == 0u);
+        assert(empty_int_list.IsEmpty());
+    }
+
+    {
+        const SingleLinkedList<string> empty_string_list;
+        assert(empty_string_list.GetSize() == 0u);
+        assert(empty_string_list.IsEmpty());
     }
 }
-// Функция TestSearchServer является точкой входа для запуска тестов
-void TestSearchServer() {
-    RUN_TEST(TestExcludeStopWordsFromAddedDocumentContent);
-    // Не забудьте вызывать остальные тесты здесь
-    RUN_TEST(TestFindAddedDocumentByDocumentWord);
-    RUN_TEST(TestExcludeDocumentsWithMinusWordsFromResults);
-    RUN_TEST(TestMatchedDocuments);
-    RUN_TEST(TestSortResultsByRelevance);
-    RUN_TEST(TestCalculateDocumentRating);
-    RUN_TEST(TestDocumentSearchByPredicate);
-    RUN_TEST(TestDocumentSearchByStatus);
-    RUN_TEST(TestCalculateRelevance);
+
+int main() {
+    Test0();
 }
-
-// --------- Окончание модульных тестов поисковой системы -----------
-
-
